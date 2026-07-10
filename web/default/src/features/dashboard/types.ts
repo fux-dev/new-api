@@ -31,6 +31,8 @@ export interface QuotaDataItem {
   token_used?: number
   count?: number
   quota?: number
+  token_id?: number
+  token_name?: string
 }
 
 export interface FlowQuotaDataItem {
@@ -249,6 +251,20 @@ export interface ProcessedChartData {
 export interface ProcessedUserChartData {
   spec_user_rank: VChartSpec
   spec_user_trend: VChartSpec
+}
+
+export interface ProcessedTokenChartData {
+  spec_token_rank: VChartSpec
+  spec_token_trend: VChartSpec
+}
+
+export interface TokenTableRow {
+  token_id: number
+  token_name: string
+  username: string
+  count: number
+  token_used: number
+  quota: number
 }
 
 // ============================================================================
