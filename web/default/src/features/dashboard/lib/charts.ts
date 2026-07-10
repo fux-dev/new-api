@@ -1031,9 +1031,7 @@ export function processTokenChartData(
     tokenQuotaTotal.set(label, prev + (Number(item.quota) || 0))
   })
 
-  const sorted = Array.from(tokenQuotaTotal.entries()).sort(
-    (a, b) => b[1] - a[1]
-  )
+  const sorted = [...tokenQuotaTotal.entries()].sort((a, b) => b[1] - a[1])
   const topTokens = sorted.slice(0, limit).map(([label]) => label)
   const topTokenSet = new Set(topTokens)
   const totalQuota = sorted.slice(0, limit).reduce((s, [, q]) => s + q, 0)
@@ -1061,12 +1059,15 @@ export function processTokenChartData(
     allTimePoints.add(timeKey)
     const label = resolveTokenLabel(item, tt)
     if (!topTokenSet.has(label)) return
-    if (!timeTokenMap.has(timeKey)) timeTokenMap.set(timeKey, new Map())
-    const map = timeTokenMap.get(timeKey)!
+    let map = timeTokenMap.get(timeKey)
+    if (!map) {
+      map = new Map()
+      timeTokenMap.set(timeKey, map)
+    }
     map.set(label, (map.get(label) || 0) + (Number(item.quota) || 0))
   })
 
-  const sortedTimePoints = Array.from(allTimePoints).sort()
+  const sortedTimePoints = [...allTimePoints].sort()
   const trendValues: Array<{
     Time: string
     Token: string
@@ -1250,5 +1251,5 @@ export function processTokenTableData(data: QuotaDataItem[]): TokenTableRow[] {
       })
     }
   })
-  return Array.from(byToken.values()).sort((a, b) => b.quota - a.quota)
+  return [...byToken.values()].sort((a, b) => b.quota - a.quota)
 }

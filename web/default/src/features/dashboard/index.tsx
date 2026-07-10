@@ -49,6 +49,7 @@ import {
   type DashboardSectionId,
   DASHBOARD_DEFAULT_SECTION,
   DASHBOARD_SECTION_IDS,
+  ADMIN_ONLY_SECTIONS,
 } from './section-registry'
 import {
   type DashboardChartPreferences,
@@ -86,6 +87,12 @@ const LazyPerformanceOverview = lazy(() =>
 const LazyUserCharts = lazy(() =>
   import('./components/users/user-charts').then((m) => ({
     default: m.UserCharts,
+  }))
+)
+
+const LazyTokenCharts = lazy(() =>
+  import('./components/tokens/token-charts').then((m) => ({
+    default: m.TokenCharts,
   }))
 )
 
@@ -158,6 +165,9 @@ const SECTION_META: Record<DashboardSectionId, { titleKey: string }> = {
   flow: {
     titleKey: 'Flow',
   },
+  tokens: {
+    titleKey: 'Token Analytics',
+  },
   users: {
     titleKey: 'User Analytics',
   },
@@ -179,6 +189,16 @@ export function Dashboard() {
     buildDefaultDashboardFilters(getSavedChartPreferences())
   )
   const [userChartsFilters, setUserChartsFilters] = useState<UserChartsFilters>(
+    () => {
+      const granularity = getSavedGranularity()
+      return {
+        timeGranularity: granularity,
+        selectedRange: getDefaultDays(granularity),
+        topUserLimit: 10,
+      }
+    }
+  )
+  const [tokenChartsFilters, setTokenChartsFilters] = useState<UserChartsFilters>(
     () => {
       const granularity = getSavedGranularity()
       return {
@@ -220,7 +240,9 @@ export function Dashboard() {
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
-        (section) => section !== 'overview' && (section !== 'users' || isAdmin)
+        (section) =>
+          section !== 'overview' &&
+          (!ADMIN_ONLY_SECTIONS.has(section) || isAdmin)
       ),
     [isAdmin]
   )
@@ -368,6 +390,16 @@ export function Dashboard() {
                 <LazyUserCharts
                   filters={userChartsFilters}
                   onFiltersChange={setUserChartsFilters}
+                />
+              </Suspense>
+            </FadeIn>
+          )}
+          {activeSection === 'tokens' && (
+            <FadeIn>
+              <Suspense fallback={<ModelChartsFallback />}>
+                <LazyTokenCharts
+                  filters={tokenChartsFilters}
+                  onFiltersChange={setTokenChartsFilters}
                 />
               </Suspense>
             </FadeIn>

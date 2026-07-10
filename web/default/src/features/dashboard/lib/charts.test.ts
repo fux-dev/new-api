@@ -62,7 +62,11 @@ describe('processTokenTableData', () => {
       table.map((r) => r.token_id),
       [22, 11, 33]
     )
-    const primary = table.find((r) => r.token_id === 11)!
+    const primary = table.find((r) => r.token_id === 11)
+    if (!primary) {
+      assert.fail('expected a row for token id 11')
+      return
+    }
     assert.equal(primary.username, 'alice')
     assert.equal(primary.count, 3)
     assert.equal(primary.quota, 150)
