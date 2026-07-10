@@ -18,6 +18,7 @@ type QuotaData struct {
 	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2"`
 	UseGroup  string `json:"use_group" gorm:"index;size:64;default:''"`
 	TokenID   int    `json:"token_id" gorm:"index;default:0"`
+	TokenName string `json:"token_name" gorm:"-"`
 	ChannelID int    `json:"channel_id" gorm:"index;default:0"`
 	NodeName  string `json:"node_name" gorm:"index;size:64;default:''"`
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
@@ -168,6 +169,59 @@ func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*Quota
 		Group("username, created_at").
 		Find(&quotaDatas).Error
 	return quotaDatas, err
+}
+
+// fillQuotaDataTokenNames back-fills TokenName on each row by batch-resolving
+// token_id → name from the tokens table. Rows whose token has been deleted
+// (no matching tokens row) keep TokenName empty.
+func fillQuotaDataTokenNames(rows []*QuotaData) error {
+	tokenIDSet := make(map[int]struct{})
+	for _, r := range rows {
+		if r.TokenID > 0 {
+			tokenIDSet[r.TokenID] = struct{}{}
+		}
+	}
+	if len(tokenIDSet) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(tokenIDSet))
+	for id := range tokenIDSet {
+		ids = append(ids, id)
+	}
+	var tokens []struct {
+		Id   int
+		Name string
+	}
+	if err := DB.Model(&Token{}).Select("id, name").Where("id IN ?", ids).Find(&tokens).Error; err != nil {
+		return err
+	}
+	nameByID := make(map[int]string, len(tokens))
+	for _, tk := range tokens {
+		nameByID[tk.Id] = tk.Name
+	}
+	for _, r := range rows {
+		if r.TokenID > 0 {
+			r.TokenName = nameByID[r.TokenID]
+		}
+	}
+	return nil
+}
+
+// GetQuotaDataGroupByToken returns quota_data aggregated by token and hour,
+// within [startTime, endTime]. Username (the token's owner) is carried so the
+// frontend table can show it without a second join.
+func GetQuotaDataGroupByToken(startTime, endTime int64) (quotaData []*QuotaData, err error) {
+	var rows []*QuotaData
+	err = DB.Table("quota_data").
+		Select("token_id, username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
+		Where("created_at >= ? and created_at <= ?", startTime, endTime).
+		Group("token_id, username, created_at").
+		Find(&rows).Error
+	if err != nil {
+		return rows, err
+	}
+	err = fillQuotaDataTokenNames(rows)
+	return rows, err
 }
 
 func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
