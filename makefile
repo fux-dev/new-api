@@ -10,7 +10,7 @@ DEV_POSTGRES_DB = new-api
 DEV_POSTGRES_USER = root
 DEV_SQLITE_PATH ?= one-api.db
 
-.PHONY: all build-web build-web-classic build-all-web start-api dev dev-api dev-api-rebuild dev-web dev-web-classic reset-setup
+.PHONY: all build-web build-web-classic build-all-web start-api dev dev-api dev-api-rebuild dev-web dev-web-classic reset-setup docker-build docker-build-cn dev-api-cn
 
 all: build-all-web start-api
 
@@ -50,6 +50,21 @@ dev-web-classic:
 	@cd $(WEB_CLASSIC_DIR) && bun run dev -- --host 0.0.0.0 --port $(DEV_WEB_CLASSIC_PORT)
 
 dev: dev-api dev-web
+
+# Build production docker image (upstream sources, no mirrors).
+docker-build:
+	@docker build -t new-api:local .
+
+# Build production docker image with China mirror acceleration.
+# Does NOT modify Dockerfile — patches it in-memory via bin/docker-build-cn.sh.
+docker-build-cn:
+	@bin/docker-build-cn.sh new-api:local Dockerfile
+
+# Build dev image with China mirrors, then start the dev stack (redis + postgres + api).
+# Compose reuses the pre-built image (no `--build`), so build args from the script take effect.
+dev-api-cn:
+	@bin/docker-build-cn.sh new-api-dev:local Dockerfile.dev
+	@docker compose -f $(DEV_COMPOSE_FILE) up -d
 
 reset-setup:
 	@echo "Resetting local setup wizard state..."
