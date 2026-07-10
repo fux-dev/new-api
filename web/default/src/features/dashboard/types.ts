@@ -267,6 +267,18 @@ export interface TokenTableRow {
   quota: number
 }
 
+export interface ProcessedTokenModelChartData {
+  spec_token_model_pie: VChartSpec
+  spec_token_model_trend: VChartSpec
+}
+
+export interface TokenModelTableRow {
+  model_name: string
+  count: number
+  token_used: number
+  quota: number
+}
+
 // ============================================================================
 // Announcement Types
 // ============================================================================

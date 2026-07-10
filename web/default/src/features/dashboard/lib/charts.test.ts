@@ -23,6 +23,8 @@ import type { QuotaDataItem } from '../types'
 import {
   processTokenChartData,
   processTokenTableData,
+  processTokenModelChartData,
+  processTokenModelTableData,
   resolveTokenLabel,
 } from './charts'
 
@@ -85,5 +87,42 @@ describe('processTokenChartData', () => {
     assert.equal(rankValues.length, 2)
     assert.equal(rankValues[0].Token, 'backup')
     assert.ok(rankValues[0].rawQuota > rankValues[1].rawQuota)
+  })
+})
+
+const modelRows: QuotaDataItem[] = [
+  { token_id: 11, token_name: 'primary', username: 'alice', model_name: 'gpt-a', created_at: 1100, count: 2, quota: 100, token_used: 40 },
+  { token_id: 11, token_name: 'primary', username: 'alice', model_name: 'gpt-a', created_at: 1200, count: 1, quota: 50, token_used: 20 },
+  { token_id: 11, token_name: 'primary', username: 'alice', model_name: 'gpt-b', created_at: 1100, count: 1, quota: 30, token_used: 10 },
+  { token_id: 22, token_name: 'backup', username: 'bob', model_name: 'gpt-b', created_at: 1100, count: 3, quota: 200, token_used: 60 },
+]
+
+describe('processTokenModelTableData', () => {
+  test('aggregates by model_name across tokens and time, sorts by quota desc', () => {
+    const table = processTokenModelTableData(modelRows)
+    assert.equal(table.length, 2)
+    assert.deepEqual(
+      table.map((r) => r.model_name),
+      ['gpt-b', 'gpt-a']
+    )
+    const gptA = table.find((r) => r.model_name === 'gpt-a')!
+    assert.equal(gptA.count, 3)
+    assert.equal(gptA.quota, 150)
+    assert.equal(gptA.token_used, 60)
+  })
+})
+
+describe('processTokenModelChartData', () => {
+  test('pie values ordered by quota desc and limited, remainder in Other', () => {
+    const chart = processTokenModelChartData(modelRows, 'day', t, 1)
+    const pieValues = chart.spec_token_model_pie.data[0].values as Array<{
+      Model: string
+      rawQuota: number
+    }>
+    // limit=1 → top model "gpt-b" (quota 230) shown, "gpt-a" (quota 150) folded into "Other"
+    assert.equal(pieValues.length, 2)
+    assert.equal(pieValues[0].Model, 'gpt-b')
+    const other = pieValues.find((v) => v.Model === 'Other')!
+    assert.ok(other.rawQuota > 0)
   })
 })

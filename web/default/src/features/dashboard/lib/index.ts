@@ -37,6 +37,8 @@ export {
   processUserChartData,
   processTokenChartData,
   processTokenTableData,
+  processTokenModelChartData,
+  processTokenModelTableData,
   resolveTokenLabel,
   renderQuotaCompat,
 } from './charts'

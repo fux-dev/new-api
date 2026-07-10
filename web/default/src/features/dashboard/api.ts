@@ -77,6 +77,29 @@ export async function getTokenQuotaData(params: {
   return res.data
 }
 
+export async function getTokenModelQuotaData(params: {
+  start_timestamp: number
+  end_timestamp: number
+  token_id?: number
+}) {
+  const res = await api.get<{ success: boolean; data: QuotaDataItem[] }>(
+    '/api/data/tokens/models',
+    { params }
+  )
+  return res.data
+}
+
+export async function getTokenNames(params: {
+  start_timestamp: number
+  end_timestamp: number
+}) {
+  const res = await api.get<{ success: boolean; data: QuotaDataItem[] }>(
+    '/api/data/token-names',
+    { params }
+  )
+  return res.data
+}
+
 export async function getFlowQuotaDates(
   params: {
     start_timestamp: number

@@ -84,3 +84,54 @@ func TestGetQuotaDatesByTokenGroupsAndResolvesNames(t *testing.T) {
 	require.Empty(t, deleted.TokenName, "deleted token must have empty TokenName")
 	require.Equal(t, "carol", deleted.Username)
 }
+
+func TestGetQuotaDatesByTokenModelGroupsAndResolvesNames(t *testing.T) {
+	setupTokenQuotaControllerTestDB(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/data/tokens/models?start_timestamp=1000&end_timestamp=2000", nil)
+
+	GetQuotaDatesByTokenModel(ctx)
+
+	payload := decodeTokenQuotaResponse(t, recorder)
+	// Rows expected (grouped by token_id, model_name, created_at):
+	//   token=11, model=gpt-a, ts=1100  (count=2, quota=100)
+	//   token=11, model=gpt-a, ts=1200  (count=1, quota=50)
+	//   token=22, model=gpt-b, ts=1100  (count=3, quota=200)
+	//   token=33, model=gpt-c, ts=1100  (count=1, quota=30, deleted token)
+	require.Len(t, payload.Data, 4)
+
+	byKey := make(map[string]model.QuotaData, len(payload.Data))
+	for _, r := range payload.Data {
+		byKey[fmt.Sprintf("%d_%s_%d", r.TokenID, r.ModelName, r.CreatedAt)] = r
+	}
+
+	m11, ok := byKey["11_gpt-a_1100"]
+	require.True(t, ok)
+	require.Equal(t, "primary", m11.TokenName)
+	require.Equal(t, "gpt-a", m11.ModelName)
+	require.Equal(t, 100, m11.Quota)
+
+	deleted, ok := byKey["33_gpt-c_1100"]
+	require.True(t, ok)
+	require.Empty(t, deleted.TokenName, "deleted token must have empty TokenName")
+	require.Equal(t, "carol", deleted.Username)
+}
+
+func TestGetQuotaDatesByTokenModelFiltersByTokenID(t *testing.T) {
+	setupTokenQuotaControllerTestDB(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/data/tokens/models?start_timestamp=1000&end_timestamp=2000&token_id=11", nil)
+
+	GetQuotaDatesByTokenModel(ctx)
+
+	payload := decodeTokenQuotaResponse(t, recorder)
+	require.Len(t, payload.Data, 2)
+	for _, r := range payload.Data {
+		require.Equal(t, 11, r.TokenID)
+		require.Equal(t, "gpt-a", r.ModelName)
+	}
+}

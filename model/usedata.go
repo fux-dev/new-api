@@ -224,6 +224,39 @@ func GetQuotaDataGroupByToken(startTime, endTime int64) (quotaData []*QuotaData,
 	return rows, err
 }
 
+// GetQuotaDataGroupByTokenModel returns quota_data aggregated by
+// (token_id, model_name, username, hour), within [startTime, endTime].
+// If tokenID > 0, only rows for that token are returned; otherwise all tokens.
+// TokenName is back-filled via fillQuotaDataTokenNames (empty for deleted tokens).
+func GetQuotaDataGroupByTokenModel(startTime, endTime int64, tokenID int) (quotaData []*QuotaData, err error) {
+	var rows []*QuotaData
+	query := DB.Table("quota_data").
+		Select("token_id, model_name, username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
+		Where("created_at >= ? and created_at <= ?", startTime, endTime)
+	if tokenID > 0 {
+		query = query.Where("token_id = ?", tokenID)
+	}
+	err = query.Group("token_id, model_name, username, created_at").Find(&rows).Error
+	if err != nil {
+		return rows, err
+	}
+	err = fillQuotaDataTokenNames(rows)
+	return rows, err
+}
+
+// GetTokenNames returns distinct (token_id, token_name, username) tuples
+// from quota_data within [startTime, endTime]. This is a lightweight query
+// intended for token filter dropdowns with 100+ tokens.
+func GetTokenNames(startTime, endTime int64) (tokenData []*QuotaData, err error) {
+	var rows []*QuotaData
+	err = DB.Table("quota_data").
+		Select("DISTINCT token_id, token_name, username").
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Order("token_name").
+		Find(&rows).Error
+	return rows, err
+}
+
 func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
 	if username != "" {
 		return GetQuotaDataByUsername(username, startTime, endTime)

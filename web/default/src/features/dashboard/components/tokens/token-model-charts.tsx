@@ -18,11 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { VChart } from '@visactor/react-vchart'
-import { KeyRound, Loader2, ChevronUp, ChevronDown } from 'lucide-react'
+import { PieChart, Loader2, ChevronUp, ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
 import {
   Table,
   TableBody,
@@ -33,7 +41,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTheme } from '@/context/theme-provider'
-import { getTokenQuotaData, getTokenNames } from '@/features/dashboard/api'
+import { getTokenModelQuotaData } from '@/features/dashboard/api'
 import {
   TIME_GRANULARITY_OPTIONS,
   TIME_RANGE_PRESETS,
@@ -41,53 +49,58 @@ import {
 import {
   getDefaultDays,
   saveGranularity,
-  processTokenChartData,
-  processTokenTableData,
-  resolveTokenLabel,
+  processTokenModelChartData,
+  processTokenModelTableData,
   renderQuotaCompat,
 } from '@/features/dashboard/lib'
 import type {
-  ProcessedTokenChartData,
-  TokenTableRow,
+  ProcessedTokenModelChartData,
+  TokenModelTableRow,
   UserChartsFilters,
 } from '@/features/dashboard/types'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
-import { TokenModelCharts, type TokenOption } from './token-model-charts'
 
 let themeManagerPromise: Promise<
   (typeof import('@visactor/vchart'))['ThemeManager']
 > | null = null
 
-const TOKEN_CHARTS: {
+const TOKEN_MODEL_CHARTS: {
   value: string
   labelKey: string
-  specKey: keyof ProcessedTokenChartData
+  specKey: keyof ProcessedTokenModelChartData
 }[] = [
   {
-    value: 'rank',
-    labelKey: 'Token Consumption Ranking',
-    specKey: 'spec_token_rank',
+    value: 'pie',
+    labelKey: 'Model Distribution',
+    specKey: 'spec_token_model_pie',
   },
   {
     value: 'trend',
-    labelKey: 'Token Consumption Trend',
-    specKey: 'spec_token_trend',
+    labelKey: 'Model Consumption Trend',
+    specKey: 'spec_token_model_trend',
   },
 ]
 
-const TOP_TOKEN_LIMIT_OPTIONS = [5, 10, 20, 50]
+const TOP_MODEL_LIMIT = 20
 const TABLE_PAGE_SIZE = 20
 
-type SortKey = 'token_name' | 'username' | 'count' | 'token_used' | 'quota'
-type SortDir = 'asc' | 'desc'
-
-interface TokenChartsProps {
-  filters: UserChartsFilters
-  onFiltersChange: (filters: UserChartsFilters) => void
+export interface TokenOption {
+  token_id: number
+  token_name: string
+  username: string
 }
 
-export function TokenCharts(props: TokenChartsProps) {
+type SortKey = 'model_name' | 'count' | 'token_used' | 'quota'
+type SortDir = 'asc' | 'desc'
+
+interface TokenModelChartsProps {
+  filters: UserChartsFilters
+  onFiltersChange: (filters: UserChartsFilters) => void
+  tokenOptions: TokenOption[]
+}
+
+export function TokenModelCharts(props: TokenModelChartsProps) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const [themeReady, setThemeReady] = useState(false)
@@ -97,13 +110,12 @@ export function TokenCharts(props: TokenChartsProps) {
 
   const timeGranularity = props.filters.timeGranularity
   const selectedRange = props.filters.selectedRange
-  const topUserLimit = props.filters.topUserLimit
   const onFiltersChange = props.onFiltersChange
 
+  const [selectedTokenID, setSelectedTokenID] = useState<number | 'all'>('all')
   const [sortKey, setSortKey] = useState<SortKey>('quota')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
-  const [subView, setSubView] = useState<'byToken' | 'byModel'>('byToken')
 
   const timeRange = useMemo(() => {
     const { start, end } = getRollingDateRange(selectedRange)
@@ -132,13 +144,6 @@ export function TokenCharts(props: TokenChartsProps) {
     [onFiltersChange, props.filters]
   )
 
-  const handleTopLimitChange = useCallback(
-    (limit: number) => {
-      onFiltersChange({ ...props.filters, topUserLimit: limit })
-    },
-    [onFiltersChange, props.filters]
-  )
-
   useEffect(() => {
     const updateTheme = async () => {
       setThemeReady(false)
@@ -155,50 +160,34 @@ export function TokenCharts(props: TokenChartsProps) {
     updateTheme()
   }, [resolvedTheme])
 
-  const { data: tokenData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'token-quota', timeRange],
-    queryFn: () => getTokenQuotaData(timeRange),
+  const queryParams = useMemo(
+    () =>
+      selectedTokenID === 'all'
+        ? timeRange
+        : { ...timeRange, token_id: selectedTokenID },
+    [timeRange, selectedTokenID]
+  )
+
+  const { data: modelData, isLoading } = useQuery({
+    queryKey: ['dashboard', 'token-model-quota', queryParams],
+    queryFn: () => getTokenModelQuotaData(queryParams),
     select: (res) => (res.success ? res.data : []),
     staleTime: 60_000,
   })
 
-  const { data: tokenNames } = useQuery({
-    queryKey: ['dashboard', 'token-names', timeRange],
-    queryFn: () => getTokenNames(timeRange),
-    select: (res) => (res.success ? res.data : []),
-    staleTime: 5 * 60_000,
-  })
-
-  const tokenOptions = useMemo<TokenOption[]>(() => {
-    const rows = tokenNames ?? []
-    const seen = new Set<number>()
-    const opts: TokenOption[] = []
-    for (const r of rows) {
-      const id = Number(r.token_id) || 0
-      if (id <= 0 || seen.has(id)) continue
-      seen.add(id)
-      opts.push({
-        token_id: id,
-        token_name: r.token_name ?? '',
-        username: r.username ?? '',
-      })
-    }
-    return opts
-  }, [tokenNames])
-
   const chartData = useMemo(
     () =>
-      processTokenChartData(
-        isLoading ? [] : (tokenData ?? []),
+      processTokenModelChartData(
+        isLoading ? [] : (modelData ?? []),
         timeGranularity,
         t,
-        topUserLimit
+        TOP_MODEL_LIMIT,
       ),
-    [tokenData, isLoading, timeGranularity, t, topUserLimit]
+    [modelData, isLoading, timeGranularity, t]
   )
 
   const sortedTableRows = useMemo(() => {
-    const rows = processTokenTableData(isLoading ? [] : (tokenData ?? []))
+    const rows = processTokenModelTableData(isLoading ? [] : (modelData ?? []))
     const dir = sortDir === 'asc' ? 1 : -1
     return [...rows].sort((a, b) => {
       const av = a[sortKey]
@@ -208,9 +197,12 @@ export function TokenCharts(props: TokenChartsProps) {
       }
       return String(av).localeCompare(String(bv)) * dir
     })
-  }, [tokenData, isLoading, sortKey, sortDir])
+  }, [modelData, isLoading, sortKey, sortDir])
 
-  const pageCount = Math.max(1, Math.ceil(sortedTableRows.length / TABLE_PAGE_SIZE))
+  const pageCount = Math.max(
+    1,
+    Math.ceil(sortedTableRows.length / TABLE_PAGE_SIZE)
+  )
   const safePage = Math.min(page, pageCount - 1)
   const pagedRows = sortedTableRows.slice(
     safePage * TABLE_PAGE_SIZE,
@@ -238,29 +230,16 @@ export function TokenCharts(props: TokenChartsProps) {
     )
   }
 
-  const columns: { key: SortKey; labelKey: string; align: 'left' | 'right' }[] = [
-    { key: 'token_name', labelKey: 'Token', align: 'left' },
-    { key: 'username', labelKey: 'Owner', align: 'left' },
-    { key: 'count', labelKey: 'Requests', align: 'right' },
-    { key: 'token_used', labelKey: 'Tokens', align: 'right' },
-    { key: 'quota', labelKey: 'Quota', align: 'right' },
-  ]
+  const columns: { key: SortKey; labelKey: string; align: 'left' | 'right' }[] =
+    [
+      { key: 'model_name', labelKey: 'Model', align: 'left' },
+      { key: 'count', labelKey: 'Requests', align: 'right' },
+      { key: 'token_used', labelKey: 'Tokens', align: 'right' },
+      { key: 'quota', labelKey: 'Quota', align: 'right' },
+    ]
 
   return (
     <div className='space-y-3'>
-      <Tabs value={subView} onValueChange={(v) => setSubView(v as typeof subView)}>
-        <TabsList>
-          <TabsTrigger value='byToken' className='px-3 text-xs'>
-            {t('By Token')}
-          </TabsTrigger>
-          <TabsTrigger value='byModel' className='px-3 text-xs'>
-            {t('By Model')}
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {subView === 'byToken' && (
-        <>
       <div className='flex items-center gap-1.5 overflow-x-auto pb-1 sm:gap-2'>
         <Tabs
           value={String(selectedRange)}
@@ -300,26 +279,38 @@ export function TokenCharts(props: TokenChartsProps) {
           </TabsList>
         </Tabs>
 
-        <Tabs
-          value={String(topUserLimit)}
-          onValueChange={(value) => handleTopLimitChange(Number(value))}
-          className='shrink-0'
+        <Combobox
+          value={String(selectedTokenID)}
+          onValueChange={(v) =>
+            setSelectedTokenID(v === 'all' ? 'all' : Number(v))
+          }
         >
-          <TabsList>
-            <span className='text-muted-foreground px-2 text-xs font-medium whitespace-nowrap'>
-              {t('Top Tokens')}
-            </span>
-            {TOP_TOKEN_LIMIT_OPTIONS.map((limit) => (
-              <TabsTrigger
-                key={limit}
-                value={String(limit)}
-                className='px-2.5 text-xs'
-              >
-                {t('Top {{count}}', { count: limit })}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+          <ComboboxInput
+            showClear={selectedTokenID !== 'all'}
+            placeholder={t('Search tokens...')}
+            className='w-44'
+          />
+          <ComboboxContent>
+            <ComboboxList>
+              <ComboboxItem value='all'>{t('All Tokens')}</ComboboxItem>
+              {props.tokenOptions.map((opt) => {
+                const label =
+                  opt.token_name ||
+                  (opt.token_id > 0
+                    ? t('Deleted ({{id}})', { id: opt.token_id })
+                    : t('Unknown'))
+                return (
+                  <ComboboxItem key={opt.token_id} value={String(opt.token_id)}>
+                    {label}
+                  </ComboboxItem>
+                )
+              })}
+            </ComboboxList>
+            {props.tokenOptions.length === 0 && (
+              <ComboboxEmpty>{t('No data available')}</ComboboxEmpty>
+            )}
+          </ComboboxContent>
+        </Combobox>
 
         {isLoading && (
           <Loader2 className='text-muted-foreground size-4 animate-spin' />
@@ -327,7 +318,7 @@ export function TokenCharts(props: TokenChartsProps) {
       </div>
 
       <div className='grid gap-3'>
-        {TOKEN_CHARTS.map((chart) => {
+        {TOKEN_MODEL_CHARTS.map((chart) => {
           const spec = chartData[chart.specKey]
           return (
             <div
@@ -335,8 +326,10 @@ export function TokenCharts(props: TokenChartsProps) {
               className='overflow-hidden rounded-lg border'
             >
               <div className='flex w-full items-center gap-2 border-b px-3 py-2 sm:px-5 sm:py-3'>
-                <KeyRound className='text-muted-foreground/60 size-4' />
-                <div className='text-sm font-semibold'>{t(chart.labelKey)}</div>
+                <PieChart className='text-muted-foreground/60 size-4' />
+                <div className='text-sm font-semibold'>
+                  {t(chart.labelKey)}
+                </div>
               </div>
               <div className='h-[300px] p-1.5 sm:h-96 sm:p-2'>
                 {isLoading ? (
@@ -345,7 +338,7 @@ export function TokenCharts(props: TokenChartsProps) {
                   themeReady &&
                   spec && (
                     <VChart
-                      key={`token-${chart.value}-${topUserLimit}-${resolvedTheme}`}
+                      key={`token-model-${chart.value}-${resolvedTheme}`}
                       spec={{
                         ...spec,
                         theme: resolvedTheme === 'dark' ? 'dark' : 'light',
@@ -363,8 +356,8 @@ export function TokenCharts(props: TokenChartsProps) {
 
       <div className='overflow-hidden rounded-lg border'>
         <div className='flex w-full items-center gap-2 border-b px-3 py-2 sm:px-5 sm:py-3'>
-          <KeyRound className='text-muted-foreground/60 size-4' />
-          <div className='text-sm font-semibold'>{t('Token Details')}</div>
+          <PieChart className='text-muted-foreground/60 size-4' />
+          <div className='text-sm font-semibold'>{t('Model Details')}</div>
         </div>
         <Table>
           <TableHeader>
@@ -372,7 +365,9 @@ export function TokenCharts(props: TokenChartsProps) {
               {columns.map((col) => (
                 <TableHead
                   key={col.key}
-                  className={col.align === 'right' ? 'text-right' : 'text-left'}
+                  className={
+                    col.align === 'right' ? 'text-right' : 'text-left'
+                  }
                 >
                   <button
                     type='button'
@@ -389,15 +384,17 @@ export function TokenCharts(props: TokenChartsProps) {
           <TableBody>
             {pagedRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={columns.length} className='text-muted-foreground py-6 text-center'>
+                <TableCell
+                  colSpan={columns.length}
+                  className='text-muted-foreground py-6 text-center'
+                >
                   {t('No data available')}
                 </TableCell>
               </TableRow>
             )}
-            {pagedRows.map((row: TokenTableRow) => (
-              <TableRow key={`${row.token_id}`}>
-                <TableCell>{resolveTokenLabel(row, t)}</TableCell>
-                <TableCell>{row.username || '-'}</TableCell>
+            {pagedRows.map((row: TokenModelTableRow) => (
+              <TableRow key={`${row.model_name}`}>
+                <TableCell>{row.model_name}</TableCell>
                 <TableCell className='text-right'>
                   {row.count.toLocaleString()}
                 </TableCell>
@@ -436,18 +433,6 @@ export function TokenCharts(props: TokenChartsProps) {
           </div>
         )}
       </div>
-
-        {/* end byToken */}
-        </>
-      )}
-
-      {subView === 'byModel' && (
-        <TokenModelCharts
-          filters={props.filters}
-          onFiltersChange={props.onFiltersChange}
-          tokenOptions={tokenOptions}
-        />
-      )}
     </div>
   )
 }

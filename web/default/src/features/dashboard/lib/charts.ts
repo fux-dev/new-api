@@ -24,7 +24,9 @@ import type {
   ProcessedChartData,
   ProcessedUserChartData,
   ProcessedTokenChartData,
+  ProcessedTokenModelChartData,
   TokenTableRow,
+  TokenModelTableRow,
 } from '@/features/dashboard/types'
 import { getCurrencyDisplay } from '@/lib/currency'
 import { formatChartTime, type TimeGranularity } from '@/lib/time'
@@ -1252,4 +1254,281 @@ export function processTokenTableData(data: QuotaDataItem[]): TokenTableRow[] {
     }
   })
   return [...byToken.values()].sort((a, b) => b.quota - a.quota)
+}
+
+// ---------------------------------------------------------------------------
+// Token × Model analytics
+// ---------------------------------------------------------------------------
+
+export function processTokenModelChartData(
+  data: QuotaDataItem[],
+  timeGranularity: TimeGranularity = 'day',
+  t?: TFunction,
+  limit = 10
+): ProcessedTokenModelChartData {
+  const tt: TFunction = t ?? ((x) => x)
+  const otherLabel = tt('Other')
+  const { config } = getCurrencyDisplay()
+  const quotaPerUnit = config.quotaPerUnit
+  const formatVal = (raw: number) => renderQuotaCompat(raw, 2)
+
+  const emptyResult: ProcessedTokenModelChartData = {
+    spec_token_model_pie: {
+      type: 'pie',
+      data: [{ id: 'tokenModelPieData', values: [] }],
+      valueField: 'rawQuota',
+      categoryField: 'Model',
+      title: {
+        visible: true,
+        text: tt('Model Distribution'),
+        subtext: tt('No data available'),
+      },
+      legends: { visible: true, orient: 'right' },
+      color: { type: 'ordinal', range: USER_COLORS },
+      background: { fill: 'transparent' },
+    },
+    spec_token_model_trend: {
+      type: 'bar',
+      data: [{ id: 'tokenModelTrendData', values: [] }],
+      xField: 'Time',
+      yField: 'rawQuota',
+      seriesField: 'Model',
+      stack: true,
+      title: {
+        visible: true,
+        text: tt('Model Consumption Trend'),
+        subtext: tt('No data available'),
+      },
+      legends: { visible: true, selectMode: 'single' },
+      color: { type: 'ordinal', range: USER_COLORS },
+      background: { fill: 'transparent' },
+    },
+  }
+
+  if (!data || data.length === 0) return emptyResult
+
+  // Aggregate quota per model
+  const modelQuotaTotal = new Map<string, number>()
+  data.forEach((item) => {
+    const model = (item.model_name ?? '').trim() || tt('Unknown')
+    const prev = modelQuotaTotal.get(model) || 0
+    modelQuotaTotal.set(model, prev + (Number(item.quota) || 0))
+  })
+
+  const sorted = [...modelQuotaTotal.entries()].sort(
+    (a, b) => b[1] - a[1]
+  )
+  const topModels = sorted.slice(0, limit).map(([m]) => m)
+  const topModelSet = new Set(topModels)
+  const totalQuota = sorted.reduce((s, [, q]) => s + q, 0)
+
+  // Fold non-top models into "Other"
+  const otherQuota = sorted
+    .slice(limit)
+    .reduce((s, [, q]) => s + q, 0)
+
+  const pieValues: Array<{ Model: string; rawQuota: number; Usage: number }> =
+    sorted.slice(0, limit).map(([Model, quota]) => ({
+      Model,
+      rawQuota: quota,
+      Usage: Number((quota / quotaPerUnit).toFixed(4)),
+    }))
+  if (otherQuota > 0) {
+    pieValues.push({
+      Model: otherLabel,
+      rawQuota: otherQuota,
+      Usage: Number((otherQuota / quotaPerUnit).toFixed(4)),
+    })
+  }
+
+  const modelColorMap = pieValues.reduce<Record<string, string>>(
+    (acc, item, i) => {
+      acc[item.Model] = USER_COLORS[i % USER_COLORS.length]
+      return acc
+    },
+    {}
+  )
+
+  // Trend: per (time bucket, model)
+  const timeModelMap = new Map<string, Map<string, number>>()
+  const allTimePoints = new Set<string>()
+
+  data.forEach((item) => {
+    const ts = Number(item.created_at)
+    const timeKey = formatChartTime(ts, timeGranularity)
+    allTimePoints.add(timeKey)
+    let model = (item.model_name ?? '').trim() || tt('Unknown')
+    if (!topModelSet.has(model)) model = otherLabel
+    if (!timeModelMap.has(timeKey)) timeModelMap.set(timeKey, new Map())
+    const map = timeModelMap.get(timeKey)
+    if (map) {
+      map.set(model, (map.get(model) || 0) + (Number(item.quota) || 0))
+    }
+  })
+
+  const sortedTimePoints = [...allTimePoints].sort()
+  // series order = topModels + Other (if present)
+  const seriesModels = [...topModels]
+  if (otherQuota > 0) seriesModels.push(otherLabel)
+
+  const trendValues: Array<{
+    Time: string
+    Model: string
+    rawQuota: number
+    Usage: number
+  }> = []
+
+  sortedTimePoints.forEach((time) => {
+    seriesModels.forEach((model) => {
+      const q = timeModelMap.get(time)?.get(model) || 0
+      trendValues.push({
+        Time: time,
+        Model: model,
+        rawQuota: q,
+        Usage: Number((q / quotaPerUnit).toFixed(4)),
+      })
+    })
+  })
+
+  return {
+    spec_token_model_pie: {
+      type: 'pie',
+      data: [{ id: 'tokenModelPieData', values: pieValues }],
+      valueField: 'rawQuota',
+      categoryField: 'Model',
+      outerRadius: 0.8,
+      innerRadius: 0.5,
+      title: {
+        visible: true,
+        text: tt('Model Distribution'),
+        subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
+      },
+      legends: {
+        visible: true,
+        orient: 'right',
+        item: {
+          shape: {
+            style: {
+              symbolType: 'circle',
+            },
+          },
+        },
+      },
+      label: {
+        visible: true,
+        position: 'outside',
+        text: (datum: Record<string, unknown>) => {
+          const model = String(datum?.Model ?? '')
+          const raw = Number(datum?.rawQuota) || 0
+          const pct = totalQuota > 0 ? (raw / totalQuota) * 100 : 0
+          return `${model} ${pct.toFixed(1)}%`
+        },
+      },
+      tooltip: {
+        mark: {
+          content: [
+            {
+              key: (datum: Record<string, unknown>) => datum?.Model,
+              value: (datum: Record<string, unknown>) =>
+                formatVal(Number(datum?.rawQuota) || 0),
+            },
+          ],
+        },
+      },
+      color: { specified: modelColorMap },
+      background: { fill: 'transparent' },
+      animation: true,
+    },
+    spec_token_model_trend: {
+      type: 'bar',
+      data: [{ id: 'tokenModelTrendData', values: trendValues }],
+      xField: 'Time',
+      yField: 'rawQuota',
+      seriesField: 'Model',
+      stack: true,
+      title: {
+        visible: true,
+        text: tt('Model Consumption Trend'),
+        subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
+      },
+      legends: { visible: true, selectMode: 'single' },
+      axes: [
+        { orient: 'bottom', type: 'band' },
+        {
+          orient: 'left',
+          type: 'linear',
+          label: {
+            formatMethod: (value: number) => formatVal(value),
+          },
+        },
+      ],
+      tooltip: {
+        mark: {
+          content: [
+            {
+              key: (datum: Record<string, unknown>) => datum?.Model,
+              value: (datum: Record<string, unknown>) =>
+                formatVal(Number(datum?.rawQuota) || 0),
+            },
+          ],
+        },
+        dimension: {
+          content: [
+            {
+              key: (datum: Record<string, unknown>) => datum?.Model,
+              value: (datum: Record<string, unknown>) =>
+                Number(datum?.rawQuota) || 0,
+            },
+          ],
+          updateContent: (
+            array: Array<{ key: string; value: string | number }>
+          ) => {
+            array.sort(
+              (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
+            )
+            let sum = 0
+            for (let i = 0; i < array.length; i++) {
+              const v = Number(array[i].value) || 0
+              sum += v
+              array[i].value = formatVal(v)
+            }
+            array.unshift({
+              key: tt('Total:'),
+              value: formatVal(sum),
+            })
+            return array
+          },
+        },
+      },
+      bar: {
+        state: { hover: { stroke: '#000', lineWidth: 1 } },
+      },
+      color: { specified: modelColorMap },
+      background: { fill: 'transparent' },
+      animation: true,
+    },
+  }
+}
+
+export function processTokenModelTableData(
+  data: QuotaDataItem[]
+): TokenModelTableRow[] {
+  const byModel = new Map<string, TokenModelTableRow>()
+  data.forEach((item) => {
+    const model = (item.model_name ?? '').trim() || 'Unknown'
+    const existing = byModel.get(model)
+    if (existing) {
+      existing.count += Number(item.count) || 0
+      existing.quota += Number(item.quota) || 0
+      existing.token_used += Number(item.token_used) || 0
+    } else {
+      byModel.set(model, {
+        model_name: model,
+        count: Number(item.count) || 0,
+        token_used: Number(item.token_used) || 0,
+        quota: Number(item.quota) || 0,
+      })
+    }
+  })
+  return Array.from(byModel.values()).sort((a, b) => b.quota - a.quota)
 }
