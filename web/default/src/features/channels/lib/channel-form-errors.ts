@@ -52,6 +52,8 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
+  'custom_balance_endpoint',
+  'custom_balance_field',
 ])
 
 export function isAdvancedSettingsField(

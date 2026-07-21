@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -356,10 +358,150 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	return availableBalanceUsd, nil
 }
 
+// extractFloatByPath navigates a nested map by dot-separated path and returns the float64 value.
+// Example paths: "balance", "data.total_balance", "remain_balance".
+func extractFloatByPath(data map[string]interface{}, path string) (float64, error) {
+	parts := strings.Split(path, ".")
+	var current interface{} = data
+	for i, part := range parts {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return 0, fmt.Errorf("cannot navigate into non-object at %q", strings.Join(parts[:i], "."))
+		}
+		val, ok := m[part]
+		if !ok {
+			return 0, fmt.Errorf("field %q not found in response", path)
+		}
+		if i == len(parts)-1 {
+			switch v := val.(type) {
+			case float64:
+				if math.IsNaN(v) || math.IsInf(v, 0) {
+					return 0, fmt.Errorf("field %q is not a finite number", path)
+				}
+				return v, nil
+			case string:
+				parsed, err := strconv.ParseFloat(v, 64)
+				if err != nil {
+					return 0, fmt.Errorf("field %q is not a valid number: %q", path, v)
+				}
+				if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+					return 0, fmt.Errorf("field %q is not a finite number: %q", path, v)
+				}
+				return parsed, nil
+			default:
+				return 0, fmt.Errorf("field %q is not a number (got %T)", path, val)
+			}
+		}
+		current = val
+	}
+	return 0, fmt.Errorf("field %q not found in response", path)
+}
+
+// getCustomBalanceResponseBody fetches a URL using the channel's proxy settings
+// but does not follow redirects, so the Authorization header is never sent to
+// a different origin.
+func getCustomBalanceResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k := range headers {
+		req.Header.Add(k, headers.Get(k))
+	}
+	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
+	if err != nil {
+		return nil, err
+	}
+	noRedirectClient := &http.Client{
+		Transport: client.Transport,
+		Timeout:   client.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	res, err := noRedirectClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status code: %d", res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func updateChannelCustomBalance(channel *model.Channel) (float64, error) {
+	settings := channel.GetOtherSettings()
+	endpoint := strings.TrimSpace(settings.CustomBalanceEndpoint)
+	field := strings.TrimSpace(settings.CustomBalanceField)
+	if endpoint == "" {
+		return 0, errors.New("custom balance endpoint not configured (set custom_balance_endpoint in channel settings)")
+	}
+	if field == "" {
+		return 0, errors.New("custom balance field not configured (set custom_balance_field in channel settings)")
+	}
+
+	baseURL := channel.GetBaseURL()
+	if baseURL == "" {
+		return 0, errors.New("channel base URL is empty")
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	if !strings.HasPrefix(endpoint, "/") {
+		return 0, errors.New("custom_balance_endpoint must be a relative path starting with /")
+	}
+	if strings.HasPrefix(endpoint, "//") {
+		return 0, errors.New("custom_balance_endpoint must not be a network-path reference (//)")
+	}
+	if strings.Contains(endpoint, "://") {
+		return 0, errors.New("custom_balance_endpoint must be a relative path, not an absolute URL")
+	}
+	url := baseURL + endpoint
+
+	body, err := getCustomBalanceResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	if err != nil {
+		return 0, err
+	}
+
+	var response map[string]interface{}
+	err = common.Unmarshal(body, &response)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse balance response: %w", err)
+	}
+
+	balance, err := extractFloatByPath(response, field)
+	if err != nil {
+		return 0, err
+	}
+
+	channel.UpdateBalance(balance)
+	return balance, nil
+}
+
 func updateChannelBalance(channel *model.Channel) (float64, error) {
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
+	}
+	// Universal override: if custom_balance_endpoint and custom_balance_field
+	// are both configured, query the channel's own upstream balance endpoint
+	// regardless of channel type. When not configured, fall through to the
+	// per-type balance logic below.
+	settings := channel.GetOtherSettings()
+	endpoint := strings.TrimSpace(settings.CustomBalanceEndpoint)
+	field := strings.TrimSpace(settings.CustomBalanceField)
+	if endpoint != "" || field != "" {
+		if endpoint == "" {
+			return 0, errors.New("custom_balance_field is set but custom_balance_endpoint is empty; both must be configured together")
+		}
+		if field == "" {
+			return 0, errors.New("custom_balance_endpoint is set but custom_balance_field is empty; both must be configured together")
+		}
+		return updateChannelCustomBalance(channel)
 	}
 	switch channel.Type {
 	case constant.ChannelTypeOpenAI:
@@ -368,8 +510,6 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 		}
 	case constant.ChannelTypeAzure:
 		return 0, errors.New("尚未实现")
-	case constant.ChannelTypeCustom:
-		baseURL = channel.GetBaseURL()
 	//case common.ChannelTypeOpenAISB:
 	//	return updateChannelOpenAISBBalance(channel)
 	case constant.ChannelTypeAIProxy:

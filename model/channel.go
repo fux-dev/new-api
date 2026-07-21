@@ -967,6 +967,39 @@ func (channel *Channel) ValidateSettings() error {
 			return fmt.Errorf("advanced custom channels require a %s route when upstream model update checks are enabled", dto.AdvancedCustomModelListPath)
 		}
 	}
+	// Custom balance endpoint/field apply to all channel types as an opt-in
+	// override. Both must be set together or both left empty.
+	endpoint := strings.TrimSpace(channelOtherSettings.CustomBalanceEndpoint)
+	field := strings.TrimSpace(channelOtherSettings.CustomBalanceField)
+	if endpoint == "" && field != "" {
+		return fmt.Errorf("custom_balance_field is set but custom_balance_endpoint is empty; both must be configured together")
+	}
+	if endpoint != "" && field == "" {
+		return fmt.Errorf("custom_balance_endpoint is set but custom_balance_field is empty; both must be configured together")
+	}
+	if endpoint != "" {
+		if !strings.HasPrefix(endpoint, "/") {
+			return fmt.Errorf("custom_balance_endpoint must be a relative path starting with /")
+		}
+		if strings.HasPrefix(endpoint, "//") {
+			return fmt.Errorf("custom_balance_endpoint must not be a network-path reference (//)")
+		}
+		if strings.Contains(endpoint, "://") {
+			return fmt.Errorf("custom_balance_endpoint must be a relative path, not an absolute URL")
+		}
+		fieldParts := strings.Split(field, ".")
+		for _, part := range fieldParts {
+			if part == "" {
+				return fmt.Errorf("custom_balance_field must not contain empty segments (e.g. data..balance)")
+			}
+		}
+		if strings.HasPrefix(field, ".") {
+			return fmt.Errorf("custom_balance_field must not start with .")
+		}
+		if strings.HasSuffix(field, ".") {
+			return fmt.Errorf("custom_balance_field must not end with .")
+		}
+	}
 	return nil
 }
 

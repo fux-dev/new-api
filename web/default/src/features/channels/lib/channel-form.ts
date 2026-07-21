@@ -210,6 +210,9 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    // Custom balance
+    custom_balance_endpoint: z.string().optional(),
+    custom_balance_field: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -301,6 +304,70 @@ export const channelFormSchema = z
         'Vertex AI API Key mode does not support batch creation'
       )
     }
+
+    // Custom balance endpoint/field validation (all channel types, opt-in)
+    {
+      const endpoint = data.custom_balance_endpoint?.trim() || ''
+      const field = data.custom_balance_field?.trim() || ''
+      const hasEndpoint = endpoint.length > 0
+      const hasField = field.length > 0
+
+      // Both must be set together or both left empty
+      if (hasEndpoint !== hasField) {
+        if (!hasEndpoint) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_endpoint',
+            'Both endpoint and field must be set together, or both left empty.'
+          )
+        }
+        if (!hasField) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_field',
+            'Both endpoint and field must be set together, or both left empty.'
+          )
+        }
+      }
+
+      // Validate endpoint format
+      if (hasEndpoint) {
+        if (endpoint.includes('://')) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_endpoint',
+            'Endpoint must start with / and be a relative path.'
+          )
+        } else if (endpoint.startsWith('//')) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_endpoint',
+            'Endpoint must start with / and be a relative path.'
+          )
+        } else if (!endpoint.startsWith('/')) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_endpoint',
+            'Endpoint must start with / and be a relative path.'
+          )
+        }
+      }
+
+      // Validate field format
+      if (hasField) {
+        if (
+          field.startsWith('.') ||
+          field.endsWith('.') ||
+          field.includes('..')
+        ) {
+          addRequiredIssue(
+            ctx,
+            'custom_balance_field',
+            'Field must be a dot-separated path with no empty segments.'
+          )
+        }
+      }
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -360,6 +427,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
   advanced_custom: '',
+  custom_balance_endpoint: '',
+  custom_balance_field: '',
 }
 
 // ============================================================================
@@ -416,6 +485,8 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
+  let customBalanceEndpoint = ''
+  let customBalanceField = ''
 
   if (channel.settings) {
     try {
@@ -444,6 +515,8 @@ export function transformChannelToFormDefaults(
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
+      customBalanceEndpoint = parsed.custom_balance_endpoint || ''
+      customBalanceField = parsed.custom_balance_field || ''
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -495,6 +568,8 @@ export function transformChannelToFormDefaults(
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
+    custom_balance_endpoint: customBalanceEndpoint,
+    custom_balance_field: customBalanceField,
   }
 }
 
@@ -640,6 +715,21 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   } else if ('advanced_custom' in settingsObj) {
     delete settingsObj.advanced_custom
+  }
+
+  // Custom balance endpoint/field (all channel types, both must be set)
+  const customBalanceEndpoint = formData.custom_balance_endpoint?.trim() || ''
+  const customBalanceField = formData.custom_balance_field?.trim() || ''
+  if (customBalanceEndpoint && customBalanceField) {
+    settingsObj.custom_balance_endpoint = customBalanceEndpoint
+    settingsObj.custom_balance_field = customBalanceField
+  } else {
+    if ('custom_balance_endpoint' in settingsObj) {
+      delete settingsObj.custom_balance_endpoint
+    }
+    if ('custom_balance_field' in settingsObj) {
+      delete settingsObj.custom_balance_field
+    }
   }
 
   return JSON.stringify(settingsObj)

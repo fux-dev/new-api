@@ -53,6 +53,8 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	CustomBalanceEndpoint                 string                `json:"custom_balance_endpoint,omitempty"` // Custom 渠道余额查询接口路径（如 /v1/user/balance）
+	CustomBalanceField                    string                `json:"custom_balance_field,omitempty"`    // Custom 渠道余额在响应 JSON 中的字段路径（如 remain_balance 或 data.total_balance）
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

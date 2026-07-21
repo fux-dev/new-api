@@ -4244,6 +4244,60 @@ export function ChannelMutateDrawer({
                                 </FormItem>
                               )}
                             />
+                            <FormField
+                              control={form.control}
+                              name='custom_balance_endpoint'
+                              render={({ field }) => (
+                                <FormItem className='flex items-center justify-between px-4 py-3'>
+                                  <div className='space-y-0.5'>
+                                    <FormLabel>
+                                      {t('Custom Balance Endpoint')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        "Path relative to channel Base URL. The channel's key is sent as Bearer token."
+                                      )}
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Input
+                                      {...field}
+                                      value={field.value || ''}
+                                      className='w-48'
+                                      placeholder='/user/balance'
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={form.control}
+                              name='custom_balance_field'
+                              render={({ field }) => (
+                                <FormItem className='flex items-center justify-between px-4 py-3'>
+                                  <div className='space-y-0.5'>
+                                    <FormLabel>
+                                      {t('Custom Balance Field')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Dot-separated JSON object path. The value must be a USD amount.'
+                                      )}
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Input
+                                      {...field}
+                                      value={field.value || ''}
+                                      className='w-48'
+                                      placeholder='balance'
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
                           </fieldset>
                         </div>
 
