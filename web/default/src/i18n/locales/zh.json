@@ -1439,7 +1439,6 @@
     "Domain Filter Mode": "域名过滤模式",
     "Don't have an account?": "没有账号？",
     "Done": "完成",
-    "Dot-separated JSON object path. The value must be a USD amount.": "点号分隔的 JSON 对象路径。值必须为美元金额。",
     "Doubao custom API address editing unlocked": "已解锁豆包自定义 API 地址编辑",
     "DoubaoVideo": "DoubaoVideo",
     "Double check the configuration below. Your system will be locked until initialization is complete.": "仔细检查以下配置。您的系统将在初始化完成前保持锁定状态。",

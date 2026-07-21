@@ -4280,11 +4280,6 @@ export function ChannelMutateDrawer({
                                     <FormLabel>
                                       {t('Custom Balance Field')}
                                     </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Dot-separated JSON object path. The value must be a USD amount.'
-                                      )}
-                                    </FormDescription>
                                   </div>
                                   <FormControl>
                                     <Input
