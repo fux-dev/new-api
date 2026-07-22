@@ -16,17 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
+import { useNotifications } from '@/hooks/use-notifications'
+import { useNotificationStore } from '@/stores/notification-store'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import { NoticeDialog } from './components/notice-dialog'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -36,6 +39,32 @@ export function Home() {
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
+
+  // Notice dialog state
+  const { notice } = useNotifications()
+  const isNoticeClosed = useNotificationStore((s) => s.isNoticeClosed)
+  const setClosedUntilDate = useNotificationStore((s) => s.setClosedUntilDate)
+  const markNoticeRead = useNotificationStore((s) => s.markNoticeRead)
+  const [noticeDialogOpen, setNoticeDialogOpen] = useState(false)
+
+  let page: ReactNode
+
+  useEffect(() => {
+    if (notice && !isNoticeClosed()) {
+      setNoticeDialogOpen(true)
+      markNoticeRead(notice)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notice])
+
+  const handleCloseToday = () => {
+    setClosedUntilDate(new Date().toDateString())
+    setNoticeDialogOpen(false)
+  }
+
+  const handleClose = () => {
+    setNoticeDialogOpen(false)
+  }
 
   const syncIframePreferences = useCallback(() => {
     try {
@@ -59,18 +88,16 @@ export function Home() {
   }, [isUrl, syncIframePreferences])
 
   if (!isLoaded) {
-    return (
+    page = (
       <PublicLayout showMainContainer={false}>
         <main className='flex min-h-screen items-center justify-center'>
           <div className='text-muted-foreground'>{t('Loading...')}</div>
         </main>
       </PublicLayout>
     )
-  }
-
-  if (content) {
+  } else if (content) {
     if (isUrl) {
-      return (
+      page = (
         <PublicLayout showMainContainer={false}>
           {/*
             allow-top-navigation-by-user-activation: the custom home page URL is
@@ -90,44 +117,57 @@ export function Home() {
           />
         </PublicLayout>
       )
+    } else {
+      const contentIsHtml = isLikelyHtml(content)
+
+      if (contentIsHtml) {
+        page = (
+          <PublicLayout showMainContainer={false}>
+            <RichContent
+              mode='html'
+              htmlVariant='isolated'
+              content={content}
+              className='custom-home-content'
+            />
+          </PublicLayout>
+        )
+      } else {
+        page = (
+          <PublicLayout>
+            <div className='mx-auto max-w-6xl px-4 py-8'>
+              <RichContent
+                mode='markdown'
+                content={content}
+                className='custom-home-content'
+              />
+            </div>
+          </PublicLayout>
+        )
+      }
     }
-
-    const contentIsHtml = isLikelyHtml(content)
-
-    if (contentIsHtml) {
-      return (
-        <PublicLayout showMainContainer={false}>
-          <RichContent
-            mode='html'
-            htmlVariant='isolated'
-            content={content}
-            className='custom-home-content'
-          />
-        </PublicLayout>
-      )
-    }
-
-    return (
-      <PublicLayout>
-        <div className='mx-auto max-w-6xl px-4 py-8'>
-          <RichContent
-            mode='markdown'
-            content={content}
-            className='custom-home-content'
-          />
-        </div>
+  } else {
+    page = (
+      <PublicLayout showMainContainer={false}>
+        <Hero isAuthenticated={isAuthenticated} />
+        <Stats />
+        <Features />
+        <HowItWorks />
+        <CTA isAuthenticated={isAuthenticated} />
+        <Footer />
       </PublicLayout>
     )
   }
 
   return (
-    <PublicLayout showMainContainer={false}>
-      <Hero isAuthenticated={isAuthenticated} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <CTA isAuthenticated={isAuthenticated} />
-      <Footer />
-    </PublicLayout>
+    <>
+      {page}
+      <NoticeDialog
+        open={noticeDialogOpen}
+        onOpenChange={setNoticeDialogOpen}
+        notice={notice}
+        onCloseToday={handleCloseToday}
+        onClose={handleClose}
+      />
+    </>
   )
 }
