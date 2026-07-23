@@ -60,11 +60,18 @@ export function Home() {
     today: new Date().toDateString(),
   })
 
+  // Depend on the raw inputs (notice string + read state), not on the derived
+  // boolean. When the homepage mounts, `notice` is empty (React Query still
+  // loading) so shouldAutoOpen is false; once the query resolves the notice
+  // string changes from '' to the real content and the effect actually fires.
+  // Depending on the boolean alone would skip the effect when another re-render
+  // happens between the query resolving and the effect committing, leaving the
+  // dialog closed even though it should pop.
   useEffect(() => {
     if (shouldAutoOpen) {
       setNoticeDialogOpen(true)
     }
-  }, [shouldAutoOpen])
+  }, [shouldAutoOpen, notice, lastReadNotice, closedUntilDate])
 
   const handleCloseToday = () => {
     // Mark as read when the user dismisses the dialog, so the header bell
