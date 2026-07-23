@@ -30,6 +30,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
 import { NoticeDialog } from './components/notice-dialog'
+import { shouldAutoOpenNotice } from './lib/notice-auto-open'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -42,27 +43,43 @@ export function Home() {
 
   // Notice dialog state
   const { notice } = useNotifications()
-  const isNoticeClosed = useNotificationStore((s) => s.isNoticeClosed)
+  // Subscribe to raw state values so the effect dependency array stays
+  // explicit and transparent; no eslint-disable needed.
+  const closedUntilDate = useNotificationStore((s) => s.closedUntilDate)
+  const lastReadNotice = useNotificationStore((s) => s.lastReadNotice)
   const setClosedUntilDate = useNotificationStore((s) => s.setClosedUntilDate)
   const markNoticeRead = useNotificationStore((s) => s.markNoticeRead)
   const [noticeDialogOpen, setNoticeDialogOpen] = useState(false)
 
   let page: ReactNode
 
+  const shouldAutoOpen = shouldAutoOpenNotice({
+    notice,
+    lastReadNotice,
+    closedUntilDate,
+    today: new Date().toDateString(),
+  })
+
   useEffect(() => {
-    if (notice && !isNoticeClosed()) {
+    if (shouldAutoOpen) {
       setNoticeDialogOpen(true)
-      markNoticeRead(notice)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notice])
+  }, [shouldAutoOpen])
 
   const handleCloseToday = () => {
+    // Mark as read when the user dismisses the dialog, so the header bell
+    // keeps showing the unread dot until the content is actually seen.
+    if (notice) {
+      markNoticeRead(notice)
+    }
     setClosedUntilDate(new Date().toDateString())
     setNoticeDialogOpen(false)
   }
 
   const handleClose = () => {
+    if (notice) {
+      markNoticeRead(notice)
+    }
     setNoticeDialogOpen(false)
   }
 
